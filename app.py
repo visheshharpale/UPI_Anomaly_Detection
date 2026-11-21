@@ -1,14 +1,19 @@
 """Run:  python app.py   ->  open http://127.0.0.1:5000"""
-import warnings; warnings.filterwarnings("ignore")
+import os, warnings, joblib; warnings.filterwarnings("ignore")
 import numpy as np, pandas as pd
 from flask import Flask, jsonify, request, render_template
 from anomaly_core import *
 
 app = Flask(__name__)
-USERS = make_users(400, np.random.default_rng(0))
-print("Training detector on 14 days of synthetic history ...")
-train_df = build_features(generate(USERS, "2026-01-01", 14, 0.01, seed=0), USERS)
-DET = Detector(alert_rate=0.02).fit(train_df[FEATURES].values)
+USERS = make_users(150, np.random.default_rng(0))
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "detector.joblib")
+if os.path.exists(MODEL_PATH):
+    DET = joblib.load(MODEL_PATH)          # the SAME model trained & evaluated by main.py
+    print("Loaded detector.joblib (trained by main.py)")
+else:                                      # fallback so the demo still runs on its own
+    print("detector.joblib not found - training a small detector (run main.py first to use the full model) ...")
+    train_df = build_features(generate(USERS, "2026-01-01", 14, 0.01, seed=0), USERS)
+    DET = Detector(alert_rate=0.02).fit(train_df[FEATURES].values)
 print("Ready. Alert threshold (percentile score) =", round(float(DET.threshold), 3))
 LIVE_START = pd.Timestamp("2026-02-01")
 

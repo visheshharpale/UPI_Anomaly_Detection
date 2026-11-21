@@ -9,15 +9,16 @@ Needs roughly 3 GB of free RAM at the default size. Lower N_USERS / DAYS if need
 """
 # %% Imports & setup
 import os, sys, time, warnings; warnings.filterwarnings("ignore")
+import joblib
 import numpy as np, pandas as pd, matplotlib
 import matplotlib.pyplot as plt
 from scipy.stats import spearmanr
 from sklearn.metrics import (roc_auc_score, average_precision_score, precision_recall_curve,
                              confusion_matrix, accuracy_score, precision_score, recall_score, f1_score)
-from anomaly_core import *  
+from anomaly_core import *          # data generator, features, Detector, explain()
 
-N_USERS, DAYS = 12_000, 30          
-MAX_TRAIN = 200_000
+N_USERS, DAYS = 12_000, 30          # ~1.1 million transactions. Change these to resize.
+MAX_TRAIN = 200_000                 # models train on a random sample this big; scoring uses ALL rows
 
 os.makedirs("plots", exist_ok=True)
 pd.set_option("display.width", 200); pd.set_option("display.max_columns", 20)
@@ -62,6 +63,9 @@ ax[0].legend(); show("01_feature_distributions")
 # %% STEP 3 - Train Isolation Forest + autoencoder (on a sample), score everything
 title(f"STEP 3: Train models on a {MAX_TRAIN:,}-row sample (no labels used), score all {len(F):,}")
 det = Detector(alert_rate=0.01, max_train=MAX_TRAIN).fit(X)
+BASE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
+joblib.dump(det, os.path.join(BASE, "detector.joblib"))     # app.py loads this same model
+print("Saved trained detector -> detector.joblib")
 S = det.score(X)
 F["score"], F["iso"], F["ae"] = S["score"], S["iso"], S["ae"]
 print("Trained Isolation Forest + autoencoder. Combined score = mean percentile rank of both.")
