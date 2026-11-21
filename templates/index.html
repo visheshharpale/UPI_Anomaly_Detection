@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ATM/UPI Anomaly Monitor</title>
+<style>
+:root{--bg:#f5f6fa;--card:#fff;--tx:#1b2030;--mut:#6b7385;--bd:#e2e5ee;--ac:#3b5bdb;--bad:#d6336c;--badbg:#fff0f5;--ok:#2b8a3e}
+@media (prefers-color-scheme:dark){:root{--bg:#12141c;--card:#1b1f2b;--tx:#e8eaf2;--mut:#98a0b5;--bd:#2c3243;--ac:#748ffc;--bad:#ff6b9a;--badbg:#32182a;--ok:#69db7c}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--tx)}
+header{padding:16px 24px;border-bottom:1px solid var(--bd);background:var(--card)}h1{margin:0;font-size:18px}header p{margin:2px 0 0;color:var(--mut)}
+main{display:grid;grid-template-columns:300px 1fr;gap:16px;padding:16px 24px;max-width:1300px;margin:auto}
+@media(max-width:850px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:14px}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 10px}
+label{display:block;margin:8px 0 3px;color:var(--mut);font-size:12px}
+input,select,button{font:inherit;width:100%;padding:7px 9px;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--tx)}
+input[type=range]{padding:0}button{background:var(--ac);color:#fff;border:0;cursor:pointer;margin-top:10px;font-weight:600}
+button.sec{background:transparent;color:var(--ac);border:1px solid var(--ac)}button:disabled{opacity:.5}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.stat{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:10px 14px}
+.stat b{display:block;font-size:22px}.stat span{color:var(--mut);font-size:12px}
+.tw{max-height:560px;overflow:auto}table{width:100%;border-collapse:collapse;font-size:13px}
+th{position:sticky;top:0;background:var(--card);text-align:left;color:var(--mut);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--bd)}
+td{padding:6px 8px;border-bottom:1px solid var(--bd);vertical-align:top}tr.flag{background:var(--badbg)}tr.flag td:first-child{border-left:3px solid var(--bad)}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11px;font-weight:700}.p-bad{background:var(--bad);color:#fff}.p-ok{color:var(--ok);border:1px solid var(--ok)}
+.bar{height:6px;background:var(--bd);border-radius:3px;width:70px;margin-top:4px}.bar i{display:block;height:100%;border-radius:3px;background:var(--ac)}tr.flag .bar i{background:var(--bad)}
+.mut{color:var(--mut)}.reasons{color:var(--bad);font-size:12px}.truth{font-size:11px;color:var(--mut)}
+</style></head><body>
+<header><h1>ATM / UPI Anomaly Monitor</h1>
+<p>Unsupervised detector (Isolation Forest + autoencoder). Simulate a transaction stream and watch suspicious ones get flagged.</p></header>
+<main>
+<aside>
+ <div class="card"><h2>1 · Simulate stream</h2>
+  <label>Customers</label><input id="users" type="number" value="40" min="5" max="150">
+  <label>Fraud injected: <b id="rv">3%</b></label><input id="rate" type="range" min="0" max="10" value="3" oninput="rv.textContent=this.value+'%'">
+  <label>Playback speed</label><select id="speed"><option value="150">Fast</option><option value="40">Very fast</option><option value="400">Slow</option><option value="0">Instant</option></select>
+  <button id="go" onclick="simulate()">▶ Generate &amp; stream</button>
+ </div>
+ <div class="card"><h2>2 · Alert threshold</h2>
+  <label>Flag if score ≥ <b id="tv"></b> <span class="mut">(percentile vs normal)</span></label>
+  <input id="thr" type="range" min="0.80" max="1" step="0.001" oninput="setThr(this.value)">
+  <p class="mut" style="font-size:12px;margin:8px 0 0">Move it to trade missed fraud against false alarms. Default = top 2% of training scores.</p>
+ </div>
+ <div class="card"><h2>3 · Try your own transaction</h2>
+  <div class="row"><div><label>Customer ID</label><input id="mu" type="number" value="7" min="0" max="149" onchange="prof()"></div>
+  <div><label>Channel</label><select id="mch"><option>UPI</option><option>ATM</option></select></div></div>
+  <p id="prof" class="mut" style="font-size:12px;margin:4px 0 0"></p>
+  <div class="row"><div><label>Amount (₹)</label><input id="ma" type="number" value="500"></div>
+  <div><label>Time</label><input id="mt" type="time" value="15:00"></div></div>
+  <div class="row"><div><label>City</label><select id="mc">{% for c in cities %}<option>{{c}}</option>{% endfor %}</select></div>
+  <div><label>Repeat (rapid-fire)</label><input id="mr" type="number" value="1" min="1" max="10"></div></div>
+  <button class="sec" onclick="manual()">Score this transaction</button>
+ </div>
+</aside>
+<section>
+ <div class="stats">
+  <div class="stat"><b id="s1">0</b><span>transactions</span></div>
+  <div class="stat"><b id="s2" style="color:var(--bad)">0</b><span>flagged</span></div>
+  <div class="stat"><b id="s3">–</b><span>alert rate</span></div>
+  <div class="stat"><b id="s4">–</b><span id="s4l">precision (reveal truth)</span></div>
+ </div>
+ <div class="card" style="margin-top:14px"><div class="row" style="align-items:center;margin-bottom:8px">
+  <h2 style="margin:0;flex:3">Transaction feed</h2>
+  <label style="margin:0;flex:2;display:flex;gap:6px;align-items:center"><input type="checkbox" id="rev" style="width:auto" onchange="render()"> Reveal synthetic ground truth</label>
+  <label style="margin:0;flex:2;display:flex;gap:6px;align-items:center"><input type="checkbox" id="only" style="width:auto" onchange="render()"> Flagged only</label></div>
+  <div class="tw"><table><thead><tr><th>Time</th><th>User</th><th>Amount</th><th>Where</th><th>Ch.</th><th>Score</th><th>Verdict / why</th></tr></thead><tbody id="tb"></tbody></table></div>
+ </div>
+</section></main>
+<script>
+const $=id=>document.getElementById(id);let ALL=[],SHOWN=[],THR={{threshold}},timer=null;
+$('thr').value=THR;$('tv').textContent=THR.toFixed(3);
+const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(r=>r.json());
+function setThr(v){THR=+v;$('tv').textContent=THR.toFixed(3);render()}
+function fmt(n){return '₹'+n.toLocaleString('en-IN',{maximumFractionDigits:0})}
+function render(){
+  const rev=$('rev').checked,only=$('only').checked;let fl=0,tp=0,fraud=0;
+  const rows=[];
+  SHOWN.forEach(t=>{const f=t.score>=THR;if(f)fl++;if(t.truth!=='normal'){fraud++;if(f)tp++}
+    if(only&&!f)return;
+    const why=f?'<span class="pill p-bad">FLAG</span><div class="reasons">'+t.reasons.join('; ')+'</div><div class="truth">AE worst feature: '+t.ae_top+'</div>':'<span class="pill p-ok">ok</span>';
+    const tr=rev?'<div class="truth">truth: '+t.truth+'</div>':'';
+    rows.push('<tr class="'+(f?'flag':'')+'"><td>'+t.ts.slice(5)+'</td><td>'+t.user+'<div class="truth">home '+t.home+'</div></td><td>'+fmt(t.amount)+'</td><td>'+t.city+'</td><td>'+t.channel+'</td><td>'+t.score.toFixed(3)+'<div class="bar"><i style="width:'+(t.score*100)+'%"></i></div></td><td>'+why+tr+'</td></tr>')});
+  $('tb').innerHTML=rows.slice(-400).reverse().join('');
+  $('s1').textContent=SHOWN.length;$('s2').textContent=fl;$('s3').textContent=SHOWN.length?(100*fl/SHOWN.length).toFixed(1)+'%':'–';
+  if(rev&&SHOWN.length){$('s4').textContent=fl?Math.round(100*tp/fl)+'%':'–';$('s4l').textContent='precision · recall '+(fraud?Math.round(100*tp/fraud):0)+'%'}
+  else{$('s4').textContent='–';$('s4l').textContent='precision (reveal truth)'}
+}
+async function simulate(){
+  clearInterval(timer);$('go').disabled=true;$('go').textContent='Generating…';
+  const d=await post('/api/simulate',{users:+$('users').value,rate:$('rate').value/100,seed:Math.floor(Math.random()*1e6)});
+  ALL=d.txns;SHOWN=[];$('go').disabled=false;$('go').textContent='▶ Generate & stream';
+  const sp=+$('speed').value;if(!sp){SHOWN=ALL.slice();render();return}
+  let i=0;timer=setInterval(()=>{SHOWN.push(ALL[i++]);render();if(i>=ALL.length)clearInterval(timer)},Math.max(5,sp/10));
+}
+async function manual(){
+  clearInterval(timer);
+  const d=await post('/api/manual',{user:$('mu').value,amount:$('ma').value,time:$('mt').value,city:$('mc').value,channel:$('mch').value,repeat:$('mr').value});
+  ALL=d.txns;SHOWN=ALL.slice(-Math.max(+$('mr').value,1));$('rev').checked=false;render();
+}
+async function prof(){const d=await (await fetch('/api/user/'+$('mu').value)).json();
+  $('prof').textContent='Home: '+d.home+' · usual ticket ≈ '+fmt(d.usual_amount)+' · active ~'+d.peak_hour+'h'}
+prof();
+</script></body></html>
