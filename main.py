@@ -1,13 +1,4 @@
-"""
-ATM/UPI Anomaly Detection - Steps 1 to 6 as one runnable script (scales to 1M+ transactions).
-
-HOW TO RUN IN VS CODE
-  * Plain run:  python main.py          (prints results, saves charts into ./plots)
-  * Cell by cell: install the 'Python' + 'Jupyter' extensions, then click 'Run Cell'
-    above any '# %%' line. Charts then appear in the Interactive Window.
-Needs roughly 3 GB of free RAM at the default size. Lower N_USERS / DAYS if needed.
-"""
-# %% Imports & setup
+# Imports & setup
 import os, sys, time, warnings; warnings.filterwarnings("ignore")
 import joblib
 import numpy as np, pandas as pd, matplotlib
@@ -31,7 +22,7 @@ def show(name):
 
 def title(t): print("\n" + "=" * 70 + f"\n{t}   [{time.time() - T0:.0f}s elapsed]\n" + "=" * 70)
 
-# %% STEP 1
+# STEP 1
 title("STEP 1: Why unsupervised?")
 print("""Fraud labels are scarce because:
  - fraud is <0.1% of transactions (extreme class imbalance)
@@ -40,14 +31,14 @@ print("""Fraud labels are scarce because:
  - labelling needs human investigators and the data is privacy-sensitive
 => model what NORMAL looks like, flag what deviates.""")
 
-# %% Create data(synthetic)
+# Create synthetic data
 title("DATA: synthetic transactions")
 users = make_users(N_USERS, np.random.default_rng(0))
 raw = generate(users, "2026-01-01", days=DAYS, anomaly_rate=0.01, seed=0)
 print(f"{len(raw):,} transactions | injected anomaly share: {raw.label.mean():.4f}")
 print(raw.head())
 
-# %% STEP 2 Feature engineering
+# STEP 2 Feature engineering
 title("STEP 2: Feature engineering")
 F = build_features(raw, users)
 X = F[FEATURES].values
@@ -60,7 +51,7 @@ for a, col in zip(ax, ["amount_vs_user", "log_gap_s", "speed_kmh_log", "txn_coun
     a.set_title(col)
 ax[0].legend(); show("01_feature_distributions")
 
-# %% STEP 3 Train Isolation Forest + autoencoder (on a sample), score everything
+#  STEP 3 Train Isolation Forest + autoencoder (on a sample), score everything
 title(f"STEP 3: Train models on a {MAX_TRAIN:,}-row sample (no labels used), score all {len(F):,}")
 det = Detector(alert_rate=0.01, max_train=MAX_TRAIN).fit(X)
 BASE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
@@ -75,7 +66,7 @@ ax[0].hist(F.iso, bins=60); ax[0].set_title("Isolation Forest anomaly score")
 ax[1].hist(np.log10(F.ae), bins=60); ax[1].set_title("Autoencoder log10(reconstruction error)")
 show("02_score_distributions")
 
-# %% STEP 4 Threshold
+#STEP 4 Threshold
 title("STEP 4: Threshold selection (alert budget)")
 thr = det.threshold
 F["flag"] = F.score >= thr
@@ -87,7 +78,7 @@ s = np.sort(F.score.values)[::-1]
 plt.figure(figsize=(7, 3)); plt.plot(s[:int(.05 * len(s))]); plt.axhline(thr, color="r", ls="--", label="chosen threshold")
 plt.xlabel("rank"); plt.ylabel("score"); plt.legend(); show("03_threshold_elbow")
 
-# %% STEP 5 Inspect top anomalies
+#STEP 5 Inspect top anomalies
 title("STEP 5: Top anomalies and why they look suspicious")
 top = F[F.flag].sort_values("score", ascending=False).head(15).copy()
 top["why_suspicious"] = [", ".join(explain(r)) for r in top.itertuples()]
@@ -97,7 +88,7 @@ err = pd.DataFrame(S["ae_feat"], columns=FEATURES)[F.flag.values]
 plt.figure(figsize=(7, 3)); err.idxmax(axis=1).value_counts().plot.barh(title="Feature driving autoencoder error (flagged txns)")
 show("04_ae_feature_blame")
 
-# %% STEP 6 Validation without labels
+#STEP 6 Validation without labels
 title("STEP 6: Validation without ground truth")
 k = int(.01 * len(F))
 print("(a) Model agreement: Spearman IF vs AE =", round(spearmanr(F.iso, F.ae)[0], 3))
@@ -124,7 +115,7 @@ p, r, _ = precision_recall_curve(F.label, F.score)
 plt.figure(figsize=(6, 3)); plt.plot(r, p); plt.xlabel("recall"); plt.ylabel("precision"); plt.title("PR curve (synthetic truth)")
 show("05_pr_curve")
 
-# %% STEP 6e Accuracy metrics (needs the synthetic ground truth)
+#STEP 6e Accuracy metrics (needs the synthetic ground truth)
 title("STEP 6e: Accuracy metrics on the held-out month")
 y, yhat = F2.label.values, fl.astype(int)
 tn, fp, fn, tp = confusion_matrix(y, yhat).ravel()
@@ -147,6 +138,9 @@ for q in [.005, .01, .02, .03, .05]:
     t = np.quantile(S["score"], 1 - q); f_ = S2["score"] >= t
     print(f"  top {q:>5.1%}: precision {precision_score(y, f_):.2f} | recall {recall_score(y, f_):.2f} | F1 {f1_score(y, f_):.2f}")
 
-# %% Save flagged transactions
+#Save flagged transactions
 F[F.flag].sort_values("score", ascending=False).to_csv("flagged_transactions.csv", index=False)
 print(f"\nSaved flagged_transactions.csv ({int(F.flag.sum()):,} rows) and charts in ./plots  [{time.time() - T0:.0f}s total]")
+# Full dataset
+F.drop(columns=["lat", "lon"]).to_csv("all_transactions.csv", index=False)
+print(f"Saved all_transactions.csv ({len(F):,} rows)")
