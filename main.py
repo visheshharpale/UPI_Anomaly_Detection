@@ -15,10 +15,10 @@ import matplotlib.pyplot as plt
 from scipy.stats import spearmanr
 from sklearn.metrics import (roc_auc_score, average_precision_score, precision_recall_curve,
                              confusion_matrix, accuracy_score, precision_score, recall_score, f1_score)
-from anomaly_core import *          # data generator, features, Detector, explain()
+from anomaly_core import *
 
-N_USERS, DAYS = 12_000, 30          # ~1.1 million transactions. Change these to resize.
-MAX_TRAIN = 200_000                 # models train on a random sample this big; scoring uses ALL rows
+N_USERS, DAYS = 12_000, 30 #1 million transactions.
+MAX_TRAIN = 200_000
 
 os.makedirs("plots", exist_ok=True)
 pd.set_option("display.width", 200); pd.set_option("display.max_columns", 20)
@@ -31,7 +31,7 @@ def show(name):
 
 def title(t): print("\n" + "=" * 70 + f"\n{t}   [{time.time() - T0:.0f}s elapsed]\n" + "=" * 70)
 
-# %% STEP 1 - Why unsupervised?
+# %% STEP 1
 title("STEP 1: Why unsupervised?")
 print("""Fraud labels are scarce because:
  - fraud is <0.1% of transactions (extreme class imbalance)
@@ -40,14 +40,14 @@ print("""Fraud labels are scarce because:
  - labelling needs human investigators and the data is privacy-sensitive
 => model what NORMAL looks like, flag what deviates.""")
 
-# %% Create data (synthetic)
+# %% Create data(synthetic)
 title("DATA: synthetic transactions")
 users = make_users(N_USERS, np.random.default_rng(0))
 raw = generate(users, "2026-01-01", days=DAYS, anomaly_rate=0.01, seed=0)
 print(f"{len(raw):,} transactions | injected anomaly share: {raw.label.mean():.4f}")
 print(raw.head())
 
-# %% STEP 2 - Feature engineering
+# %% STEP 2 Feature engineering
 title("STEP 2: Feature engineering")
 F = build_features(raw, users)
 X = F[FEATURES].values
@@ -60,7 +60,7 @@ for a, col in zip(ax, ["amount_vs_user", "log_gap_s", "speed_kmh_log", "txn_coun
     a.set_title(col)
 ax[0].legend(); show("01_feature_distributions")
 
-# %% STEP 3 - Train Isolation Forest + autoencoder (on a sample), score everything
+# %% STEP 3 Train Isolation Forest + autoencoder (on a sample), score everything
 title(f"STEP 3: Train models on a {MAX_TRAIN:,}-row sample (no labels used), score all {len(F):,}")
 det = Detector(alert_rate=0.01, max_train=MAX_TRAIN).fit(X)
 BASE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
@@ -75,7 +75,7 @@ ax[0].hist(F.iso, bins=60); ax[0].set_title("Isolation Forest anomaly score")
 ax[1].hist(np.log10(F.ae), bins=60); ax[1].set_title("Autoencoder log10(reconstruction error)")
 show("02_score_distributions")
 
-# %% STEP 4 - Threshold
+# %% STEP 4 Threshold
 title("STEP 4: Threshold selection (alert budget)")
 thr = det.threshold
 F["flag"] = F.score >= thr
@@ -87,7 +87,7 @@ s = np.sort(F.score.values)[::-1]
 plt.figure(figsize=(7, 3)); plt.plot(s[:int(.05 * len(s))]); plt.axhline(thr, color="r", ls="--", label="chosen threshold")
 plt.xlabel("rank"); plt.ylabel("score"); plt.legend(); show("03_threshold_elbow")
 
-# %% STEP 5 - Inspect top anomalies
+# %% STEP 5 Inspect top anomalies
 title("STEP 5: Top anomalies and why they look suspicious")
 top = F[F.flag].sort_values("score", ascending=False).head(15).copy()
 top["why_suspicious"] = [", ".join(explain(r)) for r in top.itertuples()]
@@ -97,19 +97,17 @@ err = pd.DataFrame(S["ae_feat"], columns=FEATURES)[F.flag.values]
 plt.figure(figsize=(7, 3)); err.idxmax(axis=1).value_counts().plot.barh(title="Feature driving autoencoder error (flagged txns)")
 show("04_ae_feature_blame")
 
-# %% STEP 6 - Validation without labels
+# %% STEP 6 Validation without labels
 title("STEP 6: Validation without ground truth")
 k = int(.01 * len(F))
 print("(a) Model agreement: Spearman IF vs AE =", round(spearmanr(F.iso, F.ae)[0], 3))
 a, b = set(F.nlargest(k, "iso").index), set(F.nlargest(k, "ae").index)
 print(f"    Top-1% overlap IF vs AE: {len(a & b) / k:.0%}")
 
-# Stability: retrain with different seeds (= different training samples), compare on a fixed 100k evaluation sample
 ev = np.random.default_rng(0).choice(len(X), min(100_000, len(X)), replace=False); k_ev = int(.01 * len(ev))
 tops = [set(np.argsort(-Detector(seed=sd, max_train=MAX_TRAIN).fit(X).score(X[ev])["score"])[:k_ev]) for sd in (1, 2, 3)]
 print("(b) Stability: top-1% overlap between seeds:", [f"{len(tops[0] & t) / k_ev:.0%}" for t in tops[1:]])
 
-# Held-out test: a fresh month for 3,000 customers, new random fraud, scored by the ALREADY-TRAINED model
 hold = users.sample(min(3000, len(users)), random_state=1)
 raw2 = generate(hold, "2026-03-01", DAYS, 0.01, seed=99); F2 = build_features(raw2, hold)
 S2 = det.score(F2[FEATURES].values); fl = S2["score"] >= thr
@@ -126,7 +124,7 @@ p, r, _ = precision_recall_curve(F.label, F.score)
 plt.figure(figsize=(6, 3)); plt.plot(r, p); plt.xlabel("recall"); plt.ylabel("precision"); plt.title("PR curve (synthetic truth)")
 show("05_pr_curve")
 
-# %% STEP 6e - Accuracy metrics (needs the synthetic ground truth)
+# %% STEP 6e Accuracy metrics (needs the synthetic ground truth)
 title("STEP 6e: Accuracy metrics on the held-out month")
 y, yhat = F2.label.values, fl.astype(int)
 tn, fp, fn, tp = confusion_matrix(y, yhat).ravel()
